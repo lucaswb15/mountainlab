@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPerlin2D, fbm, mulberry32, ridged } from '../lib/noise';
 
 // Each palette: sky gradient (top -> horizon), the farthest and nearest ridge colors,
@@ -141,22 +141,13 @@ export default function Mountains() {
     [size, seed]
   );
 
-  const regenerate = useCallback(() => {
-    if (fading) return;
-    setFading(true);
-    setTimeout(() => {
-      setSeed(Math.floor(Math.random() * 2 ** 31));
-      requestAnimationFrame(() => setFading(false));
-    }, 900);
-  }, [fading]);
-
   if (!scene) return <div className="scene" />;
 
   const { w, h } = size;
   const { palette, layers, sun } = scene;
 
   return (
-    <div className="scene" onClick={regenerate} aria-hidden="true">
+    <div className="scene" aria-hidden="true">
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={fading ? 'fading' : ''}>
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">

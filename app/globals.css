@@ -11,8 +11,6 @@ body {
 .scene {
   position: fixed;
   inset: 0;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .scene svg {
