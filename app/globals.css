@@ -1,5 +1,7 @@
 html,
 body {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
   margin: 0;
   padding: 0;
   width: 100%;
@@ -17,9 +19,110 @@ body {
   display: block;
   width: 100%;
   height: 100%;
-  transition: opacity 0.9s ease;
 }
 
-.scene svg.fading {
+.scene svg,
+.chrome {
+  transition: opacity 1.2s ease;
+}
+
+.scene.fading svg,
+.scene.fading .chrome {
   opacity: 0;
+}
+
+.chrome {
+  transition-delay: 0.35s;
+}
+
+/* Corner text: one gutter in from every edge. */
+.chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  padding: 0 clamp(16px, 2.5vw, 40px);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1;
+}
+
+.chrome-top {
+  top: clamp(16px, 2.5vw, 40px);
+  color: var(--top);
+}
+
+/* The nearest ridge is near-black in every palette, so the bottom text is always light. */
+.chrome-bottom {
+  bottom: clamp(16px, 2.5vw, 40px);
+  color: #f1efe8;
+}
+
+.mark {
+  margin: 0;
+  font-family: var(--font-mark), var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.dim {
+  opacity: 0.55;
+}
+
+.nav {
+  display: flex;
+  gap: 28px;
+}
+
+.nav a {
+  position: relative;
+  display: inline-flex;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.nav a span {
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.nav a::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.nav a:hover::after,
+.nav a:focus-visible::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+.nav a:hover span,
+.nav a:focus-visible span {
+  transform: translate(2px, -2px);
+}
+
+.nav a:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 480px) {
+  .hint {
+    display: none;
+  }
 }

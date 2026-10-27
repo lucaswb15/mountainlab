@@ -3,19 +3,38 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPerlin2D, fbm, mulberry32, ridged } from '../lib/noise';
 
-// Each palette: sky gradient (top -> horizon), the farthest and nearest ridge colors,
-// and the color of the sun/moon glow.
+// Palettes are taken from Mountain Lab (cp_mountainlab), the TF2 map this site is named
+// after: an alpine valley at evening under overcast skies. Colors were sampled from
+// in-game screenshots.
+//
+// Each palette: sky gradient (top -> horizon), the farthest and nearest ridge colors, the
+// color of the light source and its glow, the top-corner text color (read against the top of
+// the sky), how thick the valley fog is, and how often it is picked. `sun: false` means
+// overcast: no disc, just light diffusing through cloud low over the ridges.
 const PALETTES = [
-  { name: 'haze',   sky: ['#cfcdb0', '#f3f1e2'], far: '#8f95ad', near: '#030304', glow: '#fffbe6' },
-  { name: 'dusk',   sky: ['#1f2a52', '#f2a27c'], far: '#a27b98', near: '#0b0812', glow: '#ffd4a8' },
-  { name: 'night',  sky: ['#04060d', '#1d2846'], far: '#38425f', near: '#010103', glow: '#dfe8ff' },
-  { name: 'dawn',   sky: ['#9db6cc', '#f7e6d3'], far: '#9aa8bb', near: '#121b25', glow: '#fff1dd' },
-  { name: 'pine',   sky: ['#aebfa6', '#eef0dd'], far: '#7e988a', near: '#06100b', glow: '#fbffe8' },
-  { name: 'ember',  sky: ['#2a1622', '#e86f4e'], far: '#8a4a55', near: '#0a0507', glow: '#ffb27a' },
+  // The map as it plays: mauve-grey cloud warming to dusty pink, blue-violet haze, near-black pines.
+  { name: 'Overcast',   sky: ['#6c6475', '#b8a0a8'], far: '#9991b1', near: '#141316', glow: '#f2cfc8', top: '#f4ede8', sun: false, fog: 0.4,  weight: 4 },
+  // The saturated lilac band where the last light catches the tree line.
+  { name: 'Lilac',      sky: ['#6e6280', '#c39bc4'], far: '#8f86ab', near: '#121116', glow: '#f6dcf0', top: '#f6eef6', sun: false, fog: 0.32, weight: 2 },
+  // A break in the cloud: low amber sun over warm brown ground.
+  { name: 'Last Light', sky: ['#6f6383', '#e0a690'], far: '#a08aa8', near: '#17120f', glow: '#ffd3a6', top: '#f7ece4', sun: true,  fog: 0.22, weight: 2 },
+  // Team colors, muted into moods rather than logos.
+  { name: 'RED',        sky: ['#3a2226', '#b8574a'], far: '#7d4440', near: '#120a0a', glow: '#ffb08a', top: '#f6e6df', sun: true,  fog: 0.18, weight: 1 },
+  { name: 'BLU',        sky: ['#1c2433', '#5b7a95'], far: '#4d6a83', near: '#0b0f15', glow: '#d8e6f2', top: '#e6eef6', sun: true,  fog: 0.2,  weight: 1 },
 ];
+
+// Mann Manor is the map's Halloween version; it only turns up in October.
+const MANN_MANOR = { name: 'Mann Manor', sky: ['#120e1f', '#3d2a52'], far: '#4a3a5e', near: '#07050b', glow: '#b8f09c', top: '#ece4f6', sun: true, fog: 0.25, weight: 4 };
+
+function pickPalette(rand) {
+  const pool = new Date().getMonth() === 9 ? [...PALETTES, MANN_MANOR] : PALETTES;
+  let r = rand() * pool.reduce((sum, p) => sum + p.weight, 0);
+  return pool.find((p) => (r -= p.weight) < 0) || pool[0];
+}
 
 const LAYERS = 9;
 const MARGIN = 80; // px drawn past each edge so parallax never reveals a gap
+const FOG_LAYERS = [1, 3, 5]; // valley fog is drawn in front of these layers
 
 const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, t) => {
@@ -32,7 +51,7 @@ const mixHex = (a, b, t) => {
 function buildScene(w, h, seed) {
   const rand = mulberry32(seed);
   const noise = createPerlin2D(rand);
-  const palette = PALETTES[Math.floor(rand() * PALETTES.length)];
+  const palette = pickPalette(rand);
   const step = Math.max(3, w / 400);
   // Noise is sampled against the larger side so peaks keep their shape on portrait screens.
   const span = Math.max(w, h * 1.4);
@@ -64,19 +83,23 @@ function buildScene(w, h, seed) {
       bottom: mix(color, palette.sky[1], 0.12 + 0.38 * (1 - t)),
       gradTop: (base - amp) / h,
       gradBottom: Math.min(1, (base + amp * 1.2) / h),
+      // a band of fog drawn in front of this layer, settled along its valley line
+      fog: { y: base - amp * 0.5, height: amp * 1.6 },
     });
   }
 
+  // Under cloud the light sits low and spreads wide, just above the far ridges.
   const sun = {
     x: w * (0.2 + rand() * 0.6),
-    y: h * (0.16 + rand() * 0.14),
+    y: palette.sun ? h * (0.16 + rand() * 0.14) : h * (0.36 + rand() * 0.08),
     r: Math.min(w, h) * (0.02 + rand() * 0.015),
+    reach: Math.max(w, h) * (palette.sun ? 0.55 : 0.75),
   };
 
   return { palette, layers, sun };
 }
 
-export default function Mountains() {
+export default function Mountains({ children }) {
   const [size, setSize] = useState(null);
   const [seed, setSeed] = useState(null);
   const [fading, setFading] = useState(true);
@@ -147,16 +170,16 @@ export default function Mountains() {
   const { palette, layers, sun } = scene;
 
   return (
-    <div className="scene" aria-hidden="true">
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={fading ? 'fading' : ''}>
+    <div className={`scene${fading ? ' fading' : ''}`} style={{ '--top': palette.top }}>
+      <svg aria-hidden="true" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor={palette.sky[0]} />
             <stop offset="0.6" stopColor={palette.sky[1]} />
           </linearGradient>
-          <radialGradient id="glow" cx={sun.x} cy={sun.y} r={Math.max(w, h) * 0.55} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor={palette.glow} stopOpacity="0.6" />
-            <stop offset="0.06" stopColor={palette.glow} stopOpacity="0.3" />
+          <radialGradient id="glow" cx={sun.x} cy={sun.y} r={sun.reach} gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor={palette.glow} stopOpacity={palette.sun ? 0.6 : 0.45} />
+            <stop offset="0.06" stopColor={palette.glow} stopOpacity={palette.sun ? 0.3 : 0.32} />
             <stop offset="0.25" stopColor={palette.glow} stopOpacity="0.1" />
             <stop offset="0.6" stopColor={palette.glow} stopOpacity="0.03" />
             <stop offset="1" stopColor={palette.glow} stopOpacity="0" />
@@ -175,18 +198,34 @@ export default function Mountains() {
               <stop offset="1" stopColor={l.bottom} />
             </linearGradient>
           ))}
+          <linearGradient id="fog" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={palette.sky[1]} stopOpacity="0" />
+            <stop offset="0.55" stopColor={palette.sky[1]} stopOpacity={palette.fog} />
+            <stop offset="1" stopColor={palette.sky[1]} stopOpacity="0" />
+          </linearGradient>
         </defs>
 
         <rect width={w} height={h} fill="url(#sky)" />
         <rect width={w} height={h} fill="url(#glow)" />
-        <circle cx={sun.x} cy={sun.y} r={sun.r} fill={palette.glow} opacity="0.85" />
+        {palette.sun && <circle cx={sun.x} cy={sun.y} r={sun.r} fill={palette.glow} opacity="0.85" />}
 
         {layers.map((l, i) => (
           <g key={i} ref={(el) => (groupRefs.current[i] = el)}>
             <path d={l.d} fill={`url(#layer-${i})`} />
+            {FOG_LAYERS.includes(i) && (
+              <rect x={-MARGIN} y={l.fog.y} width={w + MARGIN * 2} height={l.fog.height} fill="url(#fog)" />
+            )}
           </g>
         ))}
       </svg>
+
+      {children}
+      <footer className="chrome chrome-bottom">
+        <span>
+          {palette.name} <span className="dim">· cp_mountainlab · {String(seed % 100000).padStart(5, '0')}</span>
+        </span>
+        <span className="dim hint">Refresh for a new range</span>
+      </footer>
     </div>
   );
 }
