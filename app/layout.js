@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'mountainlab',
+  title: 'MountainLab',
   description: 'mountainlab.net',
   themeColor: '#0b0c10',
 };

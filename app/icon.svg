@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cfcdb0"/>
+      <stop offset="1" stop-color="#f3f1e2"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect width="64" height="64" rx="14"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="url(#sky)"/>
+    <circle cx="44" cy="18" r="5" fill="#fffbe6"/>
+    <path d="M0 36 L10 28 L17 32 L27 20 L35 29 L42 25 L52 33 L64 27 V64 H0 Z" fill="#8f95ad"/>
+    <path d="M0 44 L12 34 L21 40 L31 31 L41 41 L50 36 L64 43 V64 H0 Z" fill="#4a4e63"/>
+    <path d="M0 54 L14 45 L26 51 L38 44 L52 52 L64 48 V64 H0 Z" fill="#0b0c10"/>
+  </g>
+</svg>
