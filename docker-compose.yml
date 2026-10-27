@@ -1,0 +1,7 @@
+services:
+  mountainlab:
+    build: .
+    container_name: mountainlab
+    restart: unless-stopped
+    ports:
+      - "8090:80"

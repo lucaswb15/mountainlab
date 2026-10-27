@@ -1,0 +1,27 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0c10;
+}
+
+.scene {
+  position: fixed;
+  inset: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scene svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.9s ease;
+}
+
+.scene svg.fading {
+  opacity: 0;
+}
