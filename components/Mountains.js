@@ -34,31 +34,49 @@ function buildScene(w, h, seed) {
   // Depth z runs 0 (farthest ridge) to 1 (foot of the range), then on to FOREGROUND: low
   // hills nearer the viewer that sink toward the bottom of the screen.
   const baseAt = (z) => (z <= 1 ? h * (0.36 + 0.26 * z) : h * (0.62 + 0.45 * (z - 1)));
-  const ampAt = (z) => (z <= 1 ? h * (0.22 + 0.08 * z) : h * 0.3 * (1 - 0.75 * (z - 1)));
-  // A single dark hill rises in the middle of the foreground, in front of the range. Its exact
-  // position and width vary by seed.
-  const hill = { x: 0.4 + rand() * 0.2, width: 0.16 + rand() * 0.08, near: 0.32 + rand() * 0.08 };
-  const hillAt = (x, near) => {
-    // Width is measured against the longer side so the hill keeps its shape on phones.
-    const dx = (x - hill.x * w) / (hill.width * Math.max(w, h));
-    const dz = (near - hill.near) / 0.22;
-    // A rougher falloff than a plain bell curve, so the outline reads as land, not a blob.
-    const rough = 1 + 0.35 * fbm(noise, (x / span) * 9 + 90, near * 4 + 90, 4);
-    return Math.exp(-Math.pow(Math.abs(dx), 1.5) - dz * dz) * rough;
+  // The range's nearest rows settle into low foothills, so its front edge sits fairly even
+  // along the bottom of the range instead of rising into peaks of its own.
+  const foothills = (z) => {
+    const t = Math.max(0, Math.min(1, (z - 0.6) / 0.4));
+    return 1 - 0.8 * t * t * (3 - 2 * t);
+  };
+  const ampAt = (z) => (z <= 1 ? h * (0.22 + 0.08 * z) * foothills(z) : h * 0.3 * (1 - 0.75 * (z - 1)));
+  // A taller summit rises from the middle of the range, so the scene has a clear centre. Its
+  // exact position, width and depth vary by seed.
+  const peak = { x: 0.4 + rand() * 0.2, width: 0.1 + rand() * 0.05, z: 0.3 + rand() * 0.15 };
+  const peakAt = (x, z) => {
+    // Width is measured against the longer side so the summit keeps its shape on phones.
+    const dx = (x - peak.x * w) / (peak.width * Math.max(w, h));
+    const dz = (z - peak.z) / 0.22;
+    // A rougher falloff than a plain bell curve, so the outline reads as rock, not a blob.
+    const rough = 1 + 0.3 * fbm(noise, (x / span) * 9 + 90, z * 4 + 90, 4);
+    return Math.exp(-Math.pow(Math.abs(dx), 1.5) - dz * dz) * rough * h * 0.17;
   };
   const heightAt = (x, z) => {
     const u = (x / span) * 3 * Math.max(0.35, 1.3 - 0.5 * z) + offset;
     const v = z * 2.6 + offset;
-    const n = fbm(noise, u, v, 5) * 0.7 + (ridged(noise, u * 0.55, v * 0.55) - 0.45) * 1.1;
-    if (z <= 1) return n;
-    const near = (z - 1) / (FOREGROUND - 1);
-    // The foreground settles into fairly even ground, easing out of the range's relief so
-    // there is no seam; only the hill rises above it.
-    const t = Math.min(1, near / 0.4);
-    const settle = t * t * (3 - 2 * t);
-    return n * (1 - 0.82 * settle) + hillAt(x, near) * 1.7;
+    return fbm(noise, u, v, 5) * 0.7 + (ridged(noise, u * 0.55, v * 0.55) - 0.45) * 1.1;
   };
-  const yAt = (x, z) => baseAt(z) - (heightAt(x, z) + 0.3) * ampAt(z);
+
+  // Height of the range's front edge (z = 1), sampled once per pixel column.
+  const frontLift = new Float32Array(Math.ceil(W) + 16);
+  for (let i = 0; i < frontLift.length; i++) frontLift[i] = (heightAt(i - MARGIN - 8, 1) + 0.3) * ampAt(1) + peakAt(i - MARGIN - 8, 1);
+  const frontAt = (x) => {
+    const f = Math.max(0, Math.min(frontLift.length - 1.001, x + MARGIN + 8));
+    const i = Math.floor(f);
+    return frontLift[i] + (frontLift[i + 1] - frontLift[i]) * (f - i);
+  };
+
+  const yAt = (x, z) => {
+    if (z <= 1) return baseAt(z) - (heightAt(x, z) + 0.3) * ampAt(z) - peakAt(x, z);
+    // The foreground has no relief of its own: it slopes down from the range's front edge
+    // (so there is no seam) onto low, gently rolling ground.
+    const near = (z - 1) / (FOREGROUND - 1);
+    const t = Math.min(1, near / 0.3);
+    const settle = t * t * (3 - 2 * t);
+    const ground = (fbm(noise, (x / span) * 4 + 130, near * 3 + 130, 3) + 0.4) * h * 0.035;
+    return baseAt(z) - frontAt(x) * (1 - settle) - ground * settle;
+  };
 
   // Slopes that face the viewer and the upper-left light are lit; grazing slopes fall into
   // shade. Lit ground takes one of two tones from a broad band of noise, and its
@@ -114,7 +132,7 @@ function buildScene(w, h, seed) {
     }
   }
 
-  // The crest of the foreground hills catches a little light, outlining them against the range.
+  // The foreground's crest catches a little light, outlining it against the range.
   for (let x = 0; x <= W; x += 1.1) {
     const col = Math.round(x);
     const near = (zTop[col] - 1) / (FOREGROUND - 1);
@@ -123,7 +141,7 @@ function buildScene(w, h, seed) {
     const size = near < 0.1 ? 0 : near < 0.3 ? 1 : near < 0.55 ? 2 : 3;
     if (rand() > 0.9 * fade) continue;
     const level = Math.min(3, Math.floor(fade * 4));
-    // The rim stays crisp even where the hill behind it is out of focus.
+    // The rim stays crisp even where the ground behind it is out of focus.
     buckets[bucketOf(Math.min(size, 1), rand() < 0.75 ? 0 : 1, level)].push(x + (rand() - 0.5), fgTop[col] + rand() * 2.5);
   }
 

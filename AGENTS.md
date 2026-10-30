@@ -34,15 +34,16 @@ inspired by cem hasimi's "fall" (stippled terrain on black), without its figure 
 
 ### The scene (`components/Mountains.js`)
 
-- **Range:** `ROWS` rows of terrain from far (z = 0) to the foot of the range (z = 1). A
-  floating-horizon pass walks rows near to far, so a dot only shows if it sits above every
-  nearer row in its column. Brightness follows a simple light model (slopes facing the
-  viewer and the upper-left are lit) in four alpha `LEVELS`.
+- **Range:** `ROWS` rows of terrain from far (z = 0) to the foot of the range (z = 1), with
+  one taller, lit summit (`peak`) rising near the middle. A floating-horizon pass walks
+  rows near to far, so a dot only shows if it sits above every nearer row in its column.
+  Brightness follows a simple light model (slopes facing the viewer and the upper-left are
+  lit) in four alpha `LEVELS`.
 - **Foreground:** rows continue past z = 1 to `FOREGROUND`, as ground that gets dimmer,
   sparser and out of focus (bigger, softer dots: `SIZES` / `SIZE_ALPHA`, drawn as radial
-  sprites) until it fades to black at the bottom of the screen. A single dark **hill**
-  rises in the middle of the foreground in front of the range; its crest gets a crisp,
-  faintly lit rim.
+  sprites) until it fades to black at the bottom of the screen. It stays flat: it slopes
+  down from the range's front edge onto low ground. A dark hill in the foreground was
+  tried and rejected (it read as a black peak blocking the range).
 - **Sky:** faint stars only above the ridgeline, a few twinkling.
 - **Motion:** on first load the range materialises dot by dot (dots are pre-shuffled and
   painted a slice per frame), then stars and mist fade in. A faint mist of soft dots drifts
