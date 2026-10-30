@@ -52,8 +52,11 @@ function buildScene(w, h, seed) {
     const n = fbm(noise, u, v, 5) * 0.7 + (ridged(noise, u * 0.55, v * 0.55) - 0.45) * 1.1;
     if (z <= 1) return n;
     const near = (z - 1) / (FOREGROUND - 1);
-    // Foreground ground flattens a little toward the viewer; the hill sits on top of it.
-    return n * (1 - 0.3 * Math.min(1, near / 0.55)) + hillAt(x, near) * 1.7;
+    // The foreground settles into fairly even ground, easing out of the range's relief so
+    // there is no seam; only the hill rises above it.
+    const t = Math.min(1, near / 0.4);
+    const settle = t * t * (3 - 2 * t);
+    return n * (1 - 0.82 * settle) + hillAt(x, near) * 1.7;
   };
   const yAt = (x, z) => baseAt(z) - (heightAt(x, z) + 0.3) * ampAt(z);
 
