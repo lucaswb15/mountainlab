@@ -10,12 +10,13 @@ treat everything in it as public.
 
 ## What it is today
 
-A full-screen, randomly generated mountain landscape, built as an SVG, with a minimal
-editorial layout on top. The aim is a clean look in the style of Awwwards-featured sites:
-large type, small corner text, lots of space. Keep it that way.
+A full-screen, randomly generated mountain landscape drawn in fine off-white dots on black
+(a `<canvas>`), with a minimal editorial layout on top. The aim is a clean look in the style
+of Awwwards-featured sites: small corner text, lots of space. Keep it that way. The look was
+inspired by cem hasimi's "fall" (stippled terrain on black), without its figure and colours.
 
 - **Name:** "MountainLab" comes from the owners' favourite Team Fortress 2 map, Mountain
-  Lab. Any nod to it should stay subtle.
+  Lab. Any nod to it should stay subtle (the bottom-left `cp_mountainlab` label is one).
 - **No big headline.** A full-width wordmark was tried and rejected. The landscape is the
   hero; the text stays small.
 - **Fonts:** the "MountainLab" mark (top-left) uses **Anton** from Google Fonts, a free
@@ -23,36 +24,52 @@ large type, small corner text, lots of space. Keep it that way.
   through `next/font` in `app/layout.js`. Don't host Valve's real TF2 fonts: the owner
   decided against it.
 - **Corner text:** small Inter Tight (13px) text one gutter (`clamp(16px, 2.5vw, 40px)`)
-  from each edge. Top-left is the `<h1>` "MountainLab". Top-right has the public links:
-  Plex (`plex.mountainlab.net`) and Requests (`request.mountainlab.net`). Bottom-left shows
-  the palette name and the seed as a TF2-style map name (`cp_mountainlab · 62670`), and bottom-right says "Refresh for a new range".
-- **Palettes come from the map.** The colours were sampled from in-game Mountain Lab
-  screenshots: mauve-grey overcast sky warming to dusty pink, a lilac band on the tree
-  line, blue-violet haze, near-black pines. Palettes are picked at random by `weight`:
-  - Overcast (4): the map as it plays
-  - Lilac (2)
-  - Last Light (2): the only sunlit map-colour scene
-  - RED (1) and BLU (1): muted team-colour moods
-  - **Mann Manor**, the map's Halloween version (purple night, green moon), joins the pool
-    only in October.
-- **Lighting:** `sun: false` means overcast: there is no disc, just a wide, soft glow low
-  over the ridges. Bands of valley fog (`FOG_LAYERS`, strength `fog`) give the hazy
-  alpine depth.
-- **Colours:** each palette sets `top`, the top-corner text colour, picked by hand for
-  contrast against that palette's sky. Bottom text is always light, because the nearest
-  ridge is dark in every palette. If you add or change a palette, check both.
-- The favicon (`app/icon.svg`) uses the Overcast colours.
+  from each edge, always light (the background is always near-black). Top-left is the
+  `<h1>` "MountainLab". Top-right has the public links: Plex (`plex.mountainlab.net`) and
+  Requests (`request.mountainlab.net`). Bottom-left shows the seed as a TF2-style map name
+  (`cp_mountainlab · 62670`); bottom-right says "Refresh for a new range".
+- **Monochrome, always.** One `PALETTE`: off-white for lit slopes, a slightly greyer tone
+  for broad bands, dim grey for shade. Per-scene colour palettes were tried and rejected
+  ("not liking all the colors").
 
+### The scene (`components/Mountains.js`)
+
+- **Range:** `ROWS` rows of terrain from far (z = 0) to the foot of the range (z = 1). A
+  floating-horizon pass walks rows near to far, so a dot only shows if it sits above every
+  nearer row in its column. Brightness follows a simple light model (slopes facing the
+  viewer and the upper-left are lit) in four alpha `LEVELS`.
+- **Foreground:** rows continue past z = 1 to `FOREGROUND`, as ground that gets dimmer,
+  sparser and out of focus (bigger, softer dots: `SIZES` / `SIZE_ALPHA`, drawn as radial
+  sprites) until it fades to black at the bottom of the screen. A single dark **hill**
+  rises in the middle of the foreground in front of the range; its crest gets a crisp,
+  faintly lit rim.
+- **Sky:** faint stars only above the ridgeline, a few twinkling.
+- **Motion:** on first load the range materialises dot by dot (dots are pre-shuffled and
+  painted a slice per frame), then stars and mist fade in. A faint mist of soft dots drifts
+  sideways at the foot of the range. Parallax is a small sideways shift with the pointer
+  or device tilt. All motion is off under `prefers-reduced-motion`.
+- **Performance:** the terrain is painted once to an offscreen canvas and copied each
+  frame; only stars and mist are redrawn. Building the scene takes ~0.2 s on a laptop
+  screen and ~0.5 s at 1440p. Keep an eye on this if you add rows or dots.
 - A new random seed is picked **only on page load**. Clicking does nothing; that was
-  intentional (see commit `927048a`).
-- The seed picks the palette (weighted, see above) and
-  sets the sun position and ridge shapes.
-- 9 ridge layers go from far (pale, misty, many peaks) to near (dark, larger, smoother).
-  Each layer mixes fBm noise with ridged noise.
-- Parallax: layers shift with the pointer, or with device tilt on mobile, eased each frame.
-  Nearer layers move more. It is off under `prefers-reduced-motion`.
-- On resize, the scene is rebuilt with the **same seed** at the new size (debounced
-  150 ms). The page fades in on load.
+  intentional (see commit `927048a`). On resize the scene is rebuilt with the **same
+  seed** (debounced 150 ms).
+
+### Rejected directions
+
+Kept on their own branches for reference. Don't bring these elements back unasked.
+
+- `design/layered`: the previous live design (layered SVG ridges in TF2 map palettes).
+- `design/topo`: contour map ("too busy").
+- `design/cel`: cel-shaded TF2 illustration ("childish and busy").
+- `design/distant`: distant range over still water.
+- Also tried on this design and removed: dots falling from the range ("too busy"), a
+  summit elevation marker, and a cursor spotlight.
+
+- The favicon (`app/icon.svg`) is a small dotted peak, off-white on black.
+- **Link previews:** `app/opengraph-image.png` (1200×630 screenshot) plus
+  `opengraph-image.alt.txt`. `metadataBase` in `app/layout.js` makes the URL absolute. If
+  the design changes, retake the screenshot.
 
 ## Stack
 
@@ -69,9 +86,10 @@ large type, small corner text, lots of space. Keep it that way.
 | --- | --- |
 | `app/layout.js` | Root layout, metadata, and the Inter Tight font (via `next/font`, exposed as `--font-display`). |
 | `app/page.js` | Home route. Holds the public `LINKS` and renders the top bar inside `<Mountains>`. |
-| `app/globals.css` | Full-viewport, no-scroll body; the fixed full-screen `.scene`; fade-in; wordmark, corner-text and nav-hover styles. |
-| `app/icon.svg` | Favicon: a small mountain tile in the Overcast palette. |
-| `components/Mountains.js` | Client component. Contains `PALETTES`, `buildScene()` (ridge geometry and wordmark placement), the resize and parallax effects, and the bottom corner text. Takes `children` for the top bar. |
+| `app/globals.css` | Full-viewport, no-scroll body; the fixed full-screen `.scene` and its canvas; corner-text fade-in; mark, corner-text and nav-hover styles. |
+| `app/icon.svg` | Favicon: a small dotted peak, off-white on black. |
+| `app/opengraph-image.png` | Link-preview image for Discord, iMessage and similar. |
+| `components/Mountains.js` | Client component. `buildScene()` (dots, stars, mist; deterministic per seed and size), the canvas painting, intro, parallax and resize effects, and the bottom corner text. Takes `children` for the top bar. |
 | `lib/noise.js` | Seeded PRNG (`mulberry32`), 2D Perlin noise, `fbm`, `ridged`. |
 
 Note: `globals.css` sets `overflow: hidden` on `html, body`. If you add content below the
@@ -119,8 +137,7 @@ Pushing to `main` publishes. Commit or push only when the owner asks.
   links in components. Load them at runtime from a file under the gated path (for example
   `/home/links.json`).
 - Keep the mountain scene as the visual identity. Put any new UI (a title, links, a footer)
-  in an overlay above `.scene`, and make it readable on every palette, from the mid-tone
-  skies (Overcast, Lilac, Last Light) to the dark ones (BLU, RED, Mann Manor).
+  in an overlay above `.scene`.
 - Keep the site static and light. Prefer plain CSS in `globals.css` (or CSS modules) over
   adding UI frameworks.
 - `buildScene()` must stay deterministic for a given `(w, h, seed)`. Resize relies on this

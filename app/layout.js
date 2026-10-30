@@ -6,9 +6,11 @@ const display = Inter_Tight({ subsets: ['latin'], weight: ['400', '500', '600'],
 const mark = Anton({ subsets: ['latin'], weight: '400', variable: '--font-mark' });
 
 export const metadata = {
+  // Absolute base for the link-preview image (app/opengraph-image.png).
+  metadataBase: new URL('https://mountainlab.net'),
   title: 'MountainLab',
   description: 'mountainlab.net',
-  themeColor: '#0b0c10',
+  themeColor: '#07060a',
 };
 
 export default function RootLayout({ children }) {

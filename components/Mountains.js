@@ -3,108 +3,179 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPerlin2D, fbm, mulberry32, ridged } from '../lib/noise';
 
-// Palettes are taken from Mountain Lab (cp_mountainlab), the TF2 map this site is named
-// after: an alpine valley at evening under overcast skies. Colors were sampled from
-// in-game screenshots.
+// A stippled range on black: the terrain is thousands of off-white dots under a sky of faint
+// stars, with low foreground hills that blur and fade into the dark. Inspired by cem hasimi's "fall".
 //
-// Each palette: sky gradient (top -> horizon), the farthest and nearest ridge colors, the
-// color of the light source and its glow, the top-corner text color (read against the top of
-// the sky), how thick the valley fog is, and how often it is picked. `sun: false` means
-// overcast: no disc, just light diffusing through cloud low over the ridges.
-const PALETTES = [
-  // The map as it plays: mauve-grey cloud warming to dusty pink, blue-violet haze, near-black pines.
-  { name: 'Overcast',   sky: ['#6c6475', '#b8a0a8'], far: '#9991b1', near: '#141316', glow: '#f2cfc8', top: '#f4ede8', sun: false, fog: 0.4,  weight: 4 },
-  // The saturated lilac band where the last light catches the tree line.
-  { name: 'Lilac',      sky: ['#6e6280', '#c39bc4'], far: '#8f86ab', near: '#121116', glow: '#f6dcf0', top: '#f6eef6', sun: false, fog: 0.32, weight: 2 },
-  // A break in the cloud: low amber sun over warm brown ground.
-  { name: 'Last Light', sky: ['#6f6383', '#e0a690'], far: '#a08aa8', near: '#17120f', glow: '#ffd3a6', top: '#f7ece4', sun: true,  fog: 0.22, weight: 2 },
-  // Team colors, muted into moods rather than logos.
-  { name: 'RED',        sky: ['#3a2226', '#b8574a'], far: '#7d4440', near: '#120a0a', glow: '#ffb08a', top: '#f6e6df', sun: true,  fog: 0.18, weight: 1 },
-  { name: 'BLU',        sky: ['#1c2433', '#5b7a95'], far: '#4d6a83', near: '#0b0f15', glow: '#d8e6f2', top: '#e6eef6', sun: true,  fog: 0.2,  weight: 1 },
-];
+// Monochrome on purpose: lit slopes are off-white, a slightly greyer band breaks up broad
+// faces, and shaded slopes fall to a dim grey.
+const PALETTE = { hi: '#efebe4', mid: '#cfcac2', dim: '#5c5852' };
 
-// Mann Manor is the map's Halloween version; it only turns up in October.
-const MANN_MANOR = { name: 'Mann Manor', sky: ['#120e1f', '#3d2a52'], far: '#4a3a5e', near: '#07050b', glow: '#b8f09c', top: '#ece4f6', sun: true, fog: 0.25, weight: 4 };
+const ROWS = 200;
+const FOREGROUND = 2; // depth where the foreground hills have faded to nothing
+const MARGIN = 40; // px drawn past each side so parallax never reveals an edge
+const DOT = 1.7;
 
-function pickPalette(rand) {
-  const pool = new Date().getMonth() === 9 ? [...PALETTES, MANN_MANOR] : PALETTES;
-  let r = rand() * pool.reduce((sum, p) => sum + p.weight, 0);
-  return pool.find((p) => (r -= p.weight) < 0) || pool[0];
-}
-
-const LAYERS = 9;
-const MARGIN = 80; // px drawn past each edge so parallax never reveals a gap
-const FOG_LAYERS = [1, 3, 5]; // valley fog is drawn in front of these layers
-
-const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const mix = (a, b, t) => {
-  const A = hexToRgb(a);
-  const B = hexToRgb(b);
-  return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`;
-};
-const mixHex = (a, b, t) => {
-  const A = hexToRgb(a);
-  const B = hexToRgb(b);
-  return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join('');
-};
+// Dots are drawn in buckets by tone (0 hi, 1 mid, 2 dim) and by how much light they catch.
+const LEVELS = [0.3, 0.52, 0.76, 1];
+// Foreground dots grow and soften as they come closer, like a shallow depth of field.
+// SIZES[0] is the in-focus range; the rest are drawn as soft sprites.
+const SIZES = [1, 1.6, 2.4, 3.4];
+const SIZE_ALPHA = [1, 0.55, 0.32, 0.2]; // bigger dots are dimmer, so the light they spread stays even
+const bucketOf = (size, tone, level) => (size * 3 + tone) * LEVELS.length + level;
 
 function buildScene(w, h, seed) {
   const rand = mulberry32(seed);
   const noise = createPerlin2D(rand);
-  const palette = pickPalette(rand);
-  const step = Math.max(3, w / 400);
-  // Noise is sampled against the larger side so peaks keep their shape on portrait screens.
   const span = Math.max(w, h * 1.4);
+  const W = w + MARGIN * 2;
+  const offset = rand() * 100;
+  const dz = 1 / (ROWS - 1);
 
-  const layers = [];
-  for (let i = 0; i < LAYERS; i++) {
-    const t = i / (LAYERS - 1); // 0 = farthest, 1 = nearest
-    const base = h * (0.47 + 0.45 * Math.pow(t, 1.3));
-    const amp = h * (0.1 + 0.11 * t);
-    const freq = 4.2 - 2.6 * t; // distant ranges show more peaks across the screen
-    const row = i * 7.31 + rand() * 100;
-    const peakiness = 0.65 - 0.4 * t;
+  // Depth z runs 0 (farthest ridge) to 1 (foot of the range), then on to FOREGROUND: low
+  // hills nearer the viewer that sink toward the bottom of the screen.
+  const baseAt = (z) => (z <= 1 ? h * (0.36 + 0.26 * z) : h * (0.62 + 0.45 * (z - 1)));
+  const ampAt = (z) => (z <= 1 ? h * (0.22 + 0.08 * z) : h * 0.3 * (1 - 0.75 * (z - 1)));
+  // A single dark hill rises in the middle of the foreground, in front of the range. Its exact
+  // position and width vary by seed.
+  const hill = { x: 0.4 + rand() * 0.2, width: 0.16 + rand() * 0.08, near: 0.32 + rand() * 0.08 };
+  const hillAt = (x, near) => {
+    // Width is measured against the longer side so the hill keeps its shape on phones.
+    const dx = (x - hill.x * w) / (hill.width * Math.max(w, h));
+    const dz = (near - hill.near) / 0.22;
+    // A rougher falloff than a plain bell curve, so the outline reads as land, not a blob.
+    const rough = 1 + 0.35 * fbm(noise, (x / span) * 9 + 90, near * 4 + 90, 4);
+    return Math.exp(-Math.pow(Math.abs(dx), 1.5) - dz * dz) * rough;
+  };
+  const heightAt = (x, z) => {
+    const u = (x / span) * 3 * Math.max(0.35, 1.3 - 0.5 * z) + offset;
+    const v = z * 2.6 + offset;
+    const n = fbm(noise, u, v, 5) * 0.7 + (ridged(noise, u * 0.55, v * 0.55) - 0.45) * 1.1;
+    if (z <= 1) return n;
+    const near = (z - 1) / (FOREGROUND - 1);
+    // Foreground ground flattens a little toward the viewer; the hill sits on top of it.
+    return n * (1 - 0.3 * Math.min(1, near / 0.55)) + hillAt(x, near) * 1.7;
+  };
+  const yAt = (x, z) => baseAt(z) - (heightAt(x, z) + 0.3) * ampAt(z);
 
-    let d = `M ${-MARGIN} ${h + MARGIN}`;
-    for (let x = -MARGIN; x <= w + MARGIN; x += step) {
-      const u = (x / span) * freq;
-      const n = fbm(noise, u, row, 6) * (1 - peakiness) + (ridged(noise, u * 0.8, row + 50) - 0.5) * peakiness;
-      const y = base - n * amp * 2;
-      d += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+  // Slopes that face the viewer and the upper-left light are lit; grazing slopes fall into
+  // shade. Lit ground takes one of two tones from a broad band of noise, and its
+  // brightness follows the light so each face reads as a surface.
+  const shadeAt = (x, z) => {
+    const y = yAt(x, z);
+    const facing = (yAt(x, z + dz) - y) / (baseAt(z + dz) - baseAt(z));
+    const slope = (yAt(x + 3, z) - yAt(x - 3, z)) / 6;
+    const lit = Math.max(0, Math.min(1, 0.05 + 0.45 * facing + slope * 1.1));
+    const band = fbm(noise, (x / span) * 1.8 + 40, z * 1.6 + heightAt(x, z) + 40, 3);
+    const hue = lit < 0.28 ? 2 : band > -0.02 ? 0 : 1;
+    const level = hue === 2 ? Math.min(2, Math.floor(lit * 8)) : Math.min(3, Math.floor((lit - 0.28) * 6));
+    return [y, hue, level, lit];
+  };
+
+  const depths = [];
+  for (let r = 0; r < ROWS; r++) depths.push(r * dz);
+  const fgStep = 3 / (h * 0.45); // keeps foreground rows about 3px apart
+  for (let z = 1 + fgStep; z <= FOREGROUND; z += fgStep) depths.push(z);
+
+  // Floating horizon: rows are walked near to far, and a dot only shows if it sits above
+  // every nearer row at that column.
+  const occ = new Float32Array(Math.ceil(W) + 2).fill(Infinity);
+  const zTop = new Float32Array(occ.length); // depth of the nearest-row crest at each column
+  let fgTop = null; // the foreground's outline, captured before the range rows are walked
+  const buckets = Array.from({ length: SIZES.length * 3 * LEVELS.length }, () => []);
+
+  for (let r = depths.length - 1; r >= 0; r--) {
+    const z = depths[r];
+    if (z <= 1 && !fgTop) fgTop = occ.slice();
+    // Foreground fades out with distance from the range: fewer, dimmer dots.
+    const near = z <= 1 ? 0 : (z - 1) / (FOREGROUND - 1);
+    const fade = Math.pow(1 - near, 1.2);
+    const size = near < 0.1 ? 0 : near < 0.3 ? 1 : near < 0.55 ? 2 : 3;
+    const gap = baseAt(Math.min(FOREGROUND, z + (z < 1 ? dz : fgStep))) - baseAt(z);
+    const step = z <= 1 ? 1.3 + (1 - z) * 0.6 : 1.3 + (z - 1) * 0.8;
+    for (let x = 0; x <= W; x += step) {
+      let [y, hue, level, lit] = shadeAt(x - MARGIN, z);
+      const col = Math.round(x);
+      const dy = y - rand() * (gap * 2 + 1);
+      const visible = dy < occ[col];
+      if (y < occ[col]) {
+        occ[col] = y;
+        zTop[col] = z;
+      }
+      const density = ((hue === 2 ? 0.4 : 0.6 + lit * 0.4) * fade * Math.sqrt(fade)) / (SIZES[size] * SIZES[size]);
+      if (!visible || rand() > density) continue;
+      if (z > 1) {
+        if (rand() > fade) hue = 2;
+        level = Math.min(level, Math.floor(fade * LEVELS.length));
+      }
+      buckets[bucketOf(size, hue, level)].push(x + (rand() - 0.5) * step, dy);
     }
-    d += ` L ${w + MARGIN} ${h + MARGIN} Z`;
+  }
 
-    const color = mixHex(palette.far, palette.near, Math.pow(t, 1.35));
-    layers.push({
-      d,
-      t,
-      top: color,
-      // valleys fill with mist: lighten the bottom of each layer toward the horizon color
-      bottom: mix(color, palette.sky[1], 0.12 + 0.38 * (1 - t)),
-      gradTop: (base - amp) / h,
-      gradBottom: Math.min(1, (base + amp * 1.2) / h),
-      // a band of fog drawn in front of this layer, settled along its valley line
-      fog: { y: base - amp * 0.5, height: amp * 1.6 },
+  // The crest of the foreground hills catches a little light, outlining them against the range.
+  for (let x = 0; x <= W; x += 1.1) {
+    const col = Math.round(x);
+    const near = (zTop[col] - 1) / (FOREGROUND - 1);
+    if (!fgTop || !isFinite(fgTop[col]) || near < 0.04) continue;
+    const fade = Math.pow(1 - near, 1.2);
+    const size = near < 0.1 ? 0 : near < 0.3 ? 1 : near < 0.55 ? 2 : 3;
+    if (rand() > 0.9 * fade) continue;
+    const level = Math.min(3, Math.floor(fade * 4));
+    // The rim stays crisp even where the hill behind it is out of focus.
+    buckets[bucketOf(Math.min(size, 1), rand() < 0.75 ? 0 : 1, level)].push(x + (rand() - 0.5), fgTop[col] + rand() * 2.5);
+  }
+
+  // Faint stars in the sky above the range, thinning toward the ridgeline. A few twinkle.
+  const stars = [];
+  for (let i = 0; i < Math.round(W / 9); i++) {
+    const x = rand() * W;
+    const y = Math.pow(rand(), 1.4) * occ[Math.round(x)];
+    const clearance = occ[Math.round(x)] - y;
+    if (clearance < h * 0.04) continue;
+    stars.push({
+      x,
+      y,
+      color: rand() < 0.7 ? 0 : 1,
+      alpha: (0.15 + rand() * 0.55) * Math.min(1, clearance / (h * 0.15)),
+      twinkle: rand() < 0.3 ? 0.5 + rand() * 1.2 : 0,
+      phase: rand() * Math.PI * 2,
+      size: rand() < 0.1 ? DOT * 1.3 : DOT * 0.9,
     });
   }
 
-  // Under cloud the light sits low and spreads wide, just above the far ridges.
-  const sun = {
-    x: w * (0.2 + rand() * 0.6),
-    y: palette.sun ? h * (0.16 + rand() * 0.14) : h * (0.36 + rand() * 0.08),
-    r: Math.min(w, h) * (0.02 + rand() * 0.015),
-    reach: Math.max(w, h) * (palette.sun ? 0.55 : 0.75),
-  };
+  // A thin mist of faint dots drifts sideways where the range meets the foreground.
+  const mist = [];
+  for (let i = 0; i < Math.round(W / 5); i++) {
+    mist.push({
+      x: rand() * W,
+      y: h * (0.5 + ((rand() + rand() + rand()) / 3 - 0.5) * 0.16),
+      speed: (rand() < 0.5 ? -1 : 1) * (3 + rand() * 7),
+      alpha: 0.05 + rand() * 0.18,
+      size: DOT * (1.5 + rand() * 2.5),
+    });
+  }
 
-  return { palette, layers, sun };
+  // Dots are shuffled so the range can materialise in random order on load.
+  const dots = buckets.map((list) => {
+    const arr = new Float32Array(list);
+    for (let i = arr.length / 2 - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [arr[i * 2], arr[j * 2]] = [arr[j * 2], arr[i * 2]];
+      [arr[i * 2 + 1], arr[j * 2 + 1]] = [arr[j * 2 + 1], arr[i * 2 + 1]];
+    }
+    return arr;
+  });
+
+  return { dots, stars, mist, width: W };
 }
 
 export default function Mountains({ children }) {
   const [size, setSize] = useState(null);
   const [seed, setSeed] = useState(null);
   const [fading, setFading] = useState(true);
-  const groupRefs = useRef([]);
-  const pointer = useRef({ x: 0, y: 0, cx: 0, cy: 0 });
+  const canvasRef = useRef(null);
+  const introDone = useRef(false);
+  // x is the pointer or tilt (-1..1); cx eases toward it and drives the parallax.
+  const pointer = useRef({ x: 0, cx: 0 });
 
   useEffect(() => {
     setSeed(Math.floor(Math.random() * 2 ** 31));
@@ -124,31 +195,113 @@ export default function Mountains({ children }) {
     };
   }, []);
 
-  // Gentle parallax that follows the pointer (or device tilt), eased each frame.
+  const scene = useMemo(
+    () => (size && size.w > 0 && size.h > 0 && seed != null ? buildScene(size.w, size.h, seed) : null),
+    [size, seed]
+  );
+
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const canvas = canvasRef.current;
+    if (!scene || !canvas) return;
+    const { w, h } = size;
+    const { dots, stars, mist, width } = scene;
+    const colors = [PALETTE.hi, PALETTE.mid, PALETTE.dim];
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // The terrain never changes, so it is drawn once and copied each frame. On first load it
+    // is drawn a slice at a time instead, so the range materialises dot by dot.
+    const terrain = document.createElement('canvas');
+    terrain.width = Math.round(width * dpr);
+    terrain.height = canvas.height;
+    const tctx = terrain.getContext('2d');
+    tctx.scale(dpr, dpr);
+    // Soft round sprites, one per tone, for the out-of-focus foreground and the mist.
+    const sprites = colors.map((color) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 32;
+      const g = c.getContext('2d');
+      const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+      grad.addColorStop(0, color);
+      grad.addColorStop(0.45, color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 32, 32);
+      return c;
+    });
+    const drawn = dots.map(() => 0);
+    const paint = (frac) => {
+      dots.forEach((list, b) => {
+        const end = Math.floor((list.length / 2) * frac) * 2;
+        const level = b % LEVELS.length;
+        const tone = Math.floor(b / LEVELS.length) % 3;
+        const size = Math.floor(b / (3 * LEVELS.length));
+        tctx.globalAlpha = LEVELS[level] * SIZE_ALPHA[size];
+        if (size === 0) {
+          tctx.fillStyle = colors[tone];
+          for (let i = drawn[b]; i < end; i += 2) tctx.fillRect(list[i], list[i + 1], DOT, DOT);
+        } else {
+          const d = DOT * SIZES[size] * 2;
+          for (let i = drawn[b]; i < end; i += 2) tctx.drawImage(sprites[tone], list[i] - d / 2, list[i + 1] - d / 2, d, d);
+        }
+        drawn[b] = end;
+      });
+    };
+    const intro = !still && !introDone.current;
+    introDone.current = true;
+    if (!intro) paint(1);
+
+    const ctx = canvas.getContext('2d');
+    let start = null;
+
+    const draw = (t) => {
+      if (start == null) start = t;
+      const p = pointer.current;
+      p.cx += (p.x - p.cx) * 0.04;
+      const shift = -MARGIN - p.cx * 16;
+      const elapsed = t - start;
+      if (intro) paint(1 - Math.pow(1 - Math.min(1, elapsed / 2200), 3));
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(terrain, shift * dpr, 0);
+
+      ctx.setTransform(dpr, 0, 0, dpr, shift * dpr, 0);
+      const sec = t / 1000;
+      const after = intro ? Math.max(0, Math.min(1, (elapsed - 1600) / 1500)) : 1;
+      for (const s of stars) {
+        const flicker = s.twinkle ? 0.55 + 0.45 * Math.sin(sec * s.twinkle + s.phase) : 1;
+        ctx.fillStyle = colors[s.color];
+        ctx.globalAlpha = s.alpha * flicker * after;
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+      }
+      for (const m of mist) {
+        const x = (((m.x + sec * m.speed) % width) + width) % width;
+        ctx.globalAlpha = m.alpha * after;
+        ctx.drawImage(sprites[0], x - m.size, m.y - m.size, m.size * 2, m.size * 2);
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    if (still) {
+      draw(0);
+      return;
+    }
+
     const onMove = (e) => {
       pointer.current.x = (e.clientX / window.innerWidth) * 2 - 1;
-      pointer.current.y = (e.clientY / window.innerHeight) * 2 - 1;
     };
     const onTilt = (e) => {
-      if (e.gamma == null) return;
-      pointer.current.x = Math.max(-1, Math.min(1, e.gamma / 30));
-      pointer.current.y = Math.max(-1, Math.min(1, (e.beta - 45) / 30));
+      if (e.gamma != null) pointer.current.x = Math.max(-1, Math.min(1, e.gamma / 30));
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('deviceorientation', onTilt);
-
     let raf;
-    const tick = () => {
-      const p = pointer.current;
-      p.cx += (p.x - p.cx) * 0.04;
-      p.cy += (p.y - p.cy) * 0.04;
-      groupRefs.current.forEach((g, i) => {
-        if (!g) return;
-        const depth = Math.pow(i / (LAYERS - 1), 2);
-        g.setAttribute('transform', `translate(${(-p.cx * 60 * depth).toFixed(2)} ${(-p.cy * 14 * depth).toFixed(2)})`);
-      });
+    const tick = (t) => {
+      draw(t);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -157,72 +310,18 @@ export default function Mountains({ children }) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('deviceorientation', onTilt);
     };
-  }, []);
-
-  const scene = useMemo(
-    () => (size && size.w > 0 && size.h > 0 && seed != null ? buildScene(size.w, size.h, seed) : null),
-    [size, seed]
-  );
+  }, [scene, size]);
 
   if (!scene) return <div className="scene" />;
 
-  const { w, h } = size;
-  const { palette, layers, sun } = scene;
-
   return (
-    <div className={`scene${fading ? ' fading' : ''}`} style={{ '--top': palette.top }}>
-      <svg aria-hidden="true" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={palette.sky[0]} />
-            <stop offset="0.6" stopColor={palette.sky[1]} />
-          </linearGradient>
-          <radialGradient id="glow" cx={sun.x} cy={sun.y} r={sun.reach} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor={palette.glow} stopOpacity={palette.sun ? 0.6 : 0.45} />
-            <stop offset="0.06" stopColor={palette.glow} stopOpacity={palette.sun ? 0.3 : 0.32} />
-            <stop offset="0.25" stopColor={palette.glow} stopOpacity="0.1" />
-            <stop offset="0.6" stopColor={palette.glow} stopOpacity="0.03" />
-            <stop offset="1" stopColor={palette.glow} stopOpacity="0" />
-          </radialGradient>
-          {layers.map((l, i) => (
-            <linearGradient
-              key={i}
-              id={`layer-${i}`}
-              x1="0"
-              y1={l.gradTop * h}
-              x2="0"
-              y2={l.gradBottom * h}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor={l.top} />
-              <stop offset="1" stopColor={l.bottom} />
-            </linearGradient>
-          ))}
-          <linearGradient id="fog" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={palette.sky[1]} stopOpacity="0" />
-            <stop offset="0.55" stopColor={palette.sky[1]} stopOpacity={palette.fog} />
-            <stop offset="1" stopColor={palette.sky[1]} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-
-        <rect width={w} height={h} fill="url(#sky)" />
-        <rect width={w} height={h} fill="url(#glow)" />
-        {palette.sun && <circle cx={sun.x} cy={sun.y} r={sun.r} fill={palette.glow} opacity="0.85" />}
-
-        {layers.map((l, i) => (
-          <g key={i} ref={(el) => (groupRefs.current[i] = el)}>
-            <path d={l.d} fill={`url(#layer-${i})`} />
-            {FOG_LAYERS.includes(i) && (
-              <rect x={-MARGIN} y={l.fog.y} width={w + MARGIN * 2} height={l.fog.height} fill="url(#fog)" />
-            )}
-          </g>
-        ))}
-      </svg>
+    <div className={`scene${fading ? ' fading' : ''}`}>
+      <canvas ref={canvasRef} aria-hidden="true" />
 
       {children}
       <footer className="chrome chrome-bottom">
         <span>
-          {palette.name} <span className="dim">· cp_mountainlab · {String(seed % 100000).padStart(5, '0')}</span>
+          cp_mountainlab <span className="dim">· {String(seed % 100000).padStart(5, '0')}</span>
         </span>
         <span className="dim hint">Refresh for a new range</span>
       </footer>

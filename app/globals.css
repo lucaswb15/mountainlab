@@ -7,7 +7,7 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0b0c10;
+  background: #07060a;
 }
 
 .scene {
@@ -15,18 +15,16 @@ body {
   inset: 0;
 }
 
-.scene svg {
+.scene canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.scene svg,
 .chrome {
   transition: opacity 1.2s ease;
 }
 
-.scene.fading svg,
 .scene.fading .chrome {
   opacity: 0;
 }
@@ -53,10 +51,10 @@ body {
 
 .chrome-top {
   top: clamp(16px, 2.5vw, 40px);
-  color: var(--top);
+  color: #f1efe8;
 }
 
-/* The nearest ridge is near-black in every palette, so the bottom text is always light. */
+/* The background is near-black, so corner text is always light. */
 .chrome-bottom {
   bottom: clamp(16px, 2.5vw, 40px);
   color: #f1efe8;
